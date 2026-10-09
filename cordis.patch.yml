@@ -1,0 +1,59 @@
+# The @argszero/dsh-image-price-fallback bundle patch: mount and go.
+#
+# The gap is a service method that a route's adapter is free not to implement.
+# `LlmAdapter.imageRequestPricing()` is documented to return `undefined` by
+# default, and the token meter reads exactly that answer:
+#
+#   packages/llm/token-meter/src/index.ts, _routeImagePricing
+#     const pricing = ctx.get('llm').imageRequestPricing(provider, model)
+#
+# An answer of `undefined` is not an error — it is the documented instruction to
+# fall back to the meter's own neutral estimate, which prices an image block by
+# the JSON length of its reference:
+#
+#   packages/llm/token-meter/src/estimate.ts
+#     BLOCK_OVERHEAD + Math.ceil(JSON.stringify(reference).length / CHARS_PER_TOKEN)
+#
+# A few dozen tokens, against a real vision charge of a thousand or more. The
+# built-in DeepSeek adapter implements the method; the `pi-ai` adapter — the one
+# behind every OpenAI-compatible and Anthropic-compatible gateway route — does
+# not, while its `modelInfo()` still advertises the model's real image
+# modality. So the request carries the pixels and the meter prices them as a
+# string.
+#
+# Where that becomes a user-visible failure is compaction. The session total is
+# repaired by the provider anchor on the steps whose header matches the anchored
+# one, but the per-node prices never are, and those are what compaction's range
+# selection reads (`compaction-basic/src/region.ts`) to decide which span to
+# summarize. An image-heavy history priced in the tens of tokens per image is not
+# the span that gets summarized, so compaction never fires on the conversation
+# body — the symptom the source report describes.
+#
+# This patch mounts the plugin and changes nothing else. It writes one property,
+# `imageRequestPricing`, onto the `llm` service instance, calls the route's own
+# implementation first, and answers only when the route answered `undefined` and
+# `resolveModelInfo()` reports that the model accepts images. A route that
+# declares its own pricing is never second-guessed; a model that cannot receive an
+# image is never priced; a route whose modality has not been resolved yet is left
+# exactly as it is today rather than guessed. `mode: 'off'` mounts nothing at all,
+# and `log: 'off'` keeps the wrapper while dropping the one line per route that
+# says the plugin is doing something.
+#
+# The estimate is dimension-based, and every constant is a knob: `divisor`
+# (default 750, pixels per visual token — the rate Anthropic publishes), `minTokens`
+# (default 85, OpenAI's low-detail base cost) and `maxTokens` (default 1600).
+# A price must be answered synchronously on every measurement, so no tokenizer for
+# an unknown gateway model can be called; the point of the fallback is not to be
+# exact but to stop pricing a retained image at the length of its own reference.
+#
+# The one value import — `offloadedImageText` from @deepseek-ai/dsh-llm — is
+# declared as a peer rather than a dependency on purpose. The plugin patches a
+# service instance; a `dependencies` entry is how a plugin ends up with its own
+# copy of the package that defines that instance's types, a second evaluation
+# whose objects are distinguishable from the host's and whose wrapping therefore
+# reaches nothing the host is listening to. This repository has shipped that
+# failure more than once.
+
+- insert:
+    - id: image-price-fallback
+      name: '@argszero/dsh-image-price-fallback'
