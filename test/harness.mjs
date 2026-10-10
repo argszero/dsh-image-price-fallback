@@ -166,7 +166,13 @@ export async function world(spec = {}) {
   }
   session.append('request/header', { header: header(route.provider, route.model), reason: 'initial' })
 
-  const fork = spec.plugin === false ? undefined : await ctx.plugin(plugin, spec.config ?? {})
+  // `plugin` is this module's namespace; a loader entry mounts its **default**
+  // export (`exports.default ?? exports`), and the two differ by the `Config` key.
+  // `plugin: 'default'` mounts the object a profile entry actually reaches — see
+  // test/mount.spec.mjs for the defect that difference hides.
+  const fork = spec.plugin === false
+    ? undefined
+    : await ctx.plugin(spec.plugin === 'default' ? plugin.default : plugin, spec.config ?? {})
 
   // A route's modality is resolved the first time the meter asks about it, so
   // the first measurement of a session is deliberately left unpriced. Real

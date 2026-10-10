@@ -51,7 +51,15 @@ export interface Settings {
   readonly log: FallbackLog
 }
 
-/** The defaults, exported so a host can render them and a test can pin them. */
+/**
+ * The defaults, exported so a host can render them and a test can pin them.
+
+ * Deliberately **not** exported as the plugin's `Config`: cordis validates a
+ * mounted plugin's `Config` through `Config['~standard'].validate`, and a plain
+ * defaults object has no `~standard`. The entry point exports
+ * `{ name, inject, apply }` with no `Config`, and these defaults arrive through
+ * `apply(ctx, config = {})`.
+ */
 export const defaultConfig: Settings = {
   mode: 'auto',
   divisor: 750,
